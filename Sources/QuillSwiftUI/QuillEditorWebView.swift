@@ -11,10 +11,27 @@ import WebKit
 import SwifterSwift
 import SafariServices
 
+public class QuillEditorWebViewConfiguration: ObservableObject {
+    @Published var currentFormat = [String: Any]()
+}
+
 public struct QuillEditorWebView: UIViewRepresentable {
+    private var logHandler: ((_ result: Any?, _ error: Error?)->()) = { _, e in
+        if let e = e {
+            print(e.localizedDescription)
+        } else {
+            print("success inject")
+        }
+    }
+    
+    @StateObject private var configuration = QuillEditorWebViewConfiguration()
+    
+    
     let webView = RichEditorWebView()
     
     let placeholder: String
+    let html: String
+    let width: CGFloat
     
     @Binding var dynamicHeight: CGFloat
     @Binding var text: String
@@ -23,11 +40,15 @@ public struct QuillEditorWebView: UIViewRepresentable {
     public var onTextChange: ((String)->())?
     
     public init(placeholder: String,
+                html: String = "",
+                width: CGFloat,
                 dynamicHeight: Binding<CGFloat>,
                 text: Binding<String>) {
         self.placeholder = placeholder
         self._dynamicHeight = dynamicHeight
         self._text = text
+        self.html = html
+        self.width = width
     }
     
     public func makeUIView(context: Context) -> some WKWebView {
@@ -46,6 +67,13 @@ public struct QuillEditorWebView: UIViewRepresentable {
                 DispatchQueue.main.async {
                     dynamicHeight = (message.body as? CGFloat) ?? 0
                 }
+                return
+            }
+            
+            guard message.name != "currentFormat"
+            else {
+                configuration.currentFormat = (message.body as? [String: Any]) ?? [:]
+                print(configuration.currentFormat)
                 return
             }
             
@@ -94,35 +122,20 @@ public struct QuillEditorWebView: UIViewRepresentable {
         webView.isOpaque = false
         webView.backgroundColor = UIColor.clear
         webView.scrollView.backgroundColor = UIColor.clear
-        
+        webView.width = width
        
         webView.accessoryView = AccessoryInputView {
-            HStack(spacing: 10){
-                Button(action: {
+            QuillEditorToolbarView(action: {
+                switch $0 {
+                case .bold:
                     formatText(style: "bold")
-                }, label: {
-                    Image(systemName: "bold")
-                })
-                
-                Button(action: {
+                case .italic:
                     formatText(style: "italic")
-                }, label: {
-                    Image(systemName: "italic")
-                })
-                
-                Button(action: {
+                case .strike:
                     formatText(style: "strike")
-                }, label: {
-                    Image(systemName: "strikethrough")
-                })
-                
-                Button(action: {
+                case .underline:
                     formatText(style: "underline")
-                }, label: {
-                    Image(systemName: "underline")
-                })
-                
-                Button(action: {
+                case .link:
                     checkLink(completionHandler: { link in
                         alertInsertLink(setupText: link == "false" ? "" : link ?? "", completionHandler: {
                             if link == "false" {
@@ -132,39 +145,17 @@ public struct QuillEditorWebView: UIViewRepresentable {
                             }
                         })
                     })
-                }, label: {
-                    Image(systemName: "link")
-                })
-                
-                Button(action: {
-                    toggleList()
-                }, label: {
-                    Image(systemName: "list.bullet")
-                })
-                
-                Button(action: {
-                    toggleListOrder()
-                }, label: {
-                    Image(systemName: "list.number")
-                })
-                
-                Spacer()
-                
-                Button(action: {
+                case .bullet:
+                    toggleListFormat(style: "bullet")
+                case .ordered:
+                    toggleListFormat(style: "ordered")
+                case .undo:
                     undo()
-                }, label: {
-                    Image(systemName: "arrow.uturn.backward")
-                })
-                
-                Button(action: {
+                case .redo:
                     redo()
-                }, label: {
-                    Image(systemName: "arrow.uturn.forward")
-                })
-            }
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .background(.white)
+                }
+            })
+            .environmentObject(configuration)
         }
     }
     
@@ -178,11 +169,105 @@ public struct QuillEditorWebView: UIViewRepresentable {
     }
 }
 
+enum QuillEditorToolbarAction {
+    case bold
+    case italic
+    case strike
+    case underline
+    case link
+    case bullet
+    case ordered
+    case undo
+    case redo
+}
+
+struct QuillEditorToolbarView: View {
+    @EnvironmentObject private var configuration: QuillEditorWebViewConfiguration
+    var action: ((QuillEditorToolbarAction)->())?
+    
+    var body: some View {
+        HStack(spacing: 10){
+            Button(action: {
+                action?(.bold)
+            }, label: {
+                let isBold = configuration.currentFormat.contains(where: { $0.key == "bold" && ($0.value as? Bool) ?? false})
+                Image(systemName: "bold")
+                    .foregroundColor(isBold ? .blue : .black)
+            })
+            
+            Button(action: {
+                action?(.italic)
+            }, label: {
+                let isItalic = configuration.currentFormat.contains(where: { $0.key == "italic" && ($0.value as? Bool) ?? false})
+                Image(systemName: "italic")
+                    .foregroundColor(isItalic ? .blue : .black)
+            })
+            
+            Button(action: {
+                action?(.strike)
+            }, label: {
+                let isStrike = configuration.currentFormat.contains(where: { $0.key == "strike" && ($0.value as? Bool) ?? false})
+                Image(systemName: "strikethrough")
+                    .foregroundColor(isStrike ? .blue : .black)
+            })
+            
+            Button(action: {
+                action?(.underline)
+            }, label: {
+                let isUnderline = configuration.currentFormat.contains(where: { $0.key == "underline" && ($0.value as? Bool) ?? false})
+                Image(systemName: "underline")
+                    .foregroundColor(isUnderline ? .blue : .black)
+            })
+            
+            Button(action: {
+                action?(.link)
+            }, label: {
+                let isLink = configuration.currentFormat.contains(where: { $0.key == "link" })
+                Image(systemName: "link")
+                    .foregroundColor(isLink ? .blue : .black)
+            })
+            
+            Button(action: {
+                action?(.bullet)
+            }, label: {
+                let isBullet = configuration.currentFormat.contains(where: { $0.key == "list" && ($0.value as? String) == "bullet" })
+                Image(systemName: "list.bullet")
+                    .foregroundColor(isBullet ? .blue : .black)
+            })
+            
+            Button(action: {
+                action?(.ordered)
+            }, label: {
+                let isOrdered = configuration.currentFormat.contains(where: { $0.key == "list" && ($0.value as? String) == "ordered" })
+                Image(systemName: "list.number")
+                    .foregroundColor(isOrdered ? .blue : .black)
+            })
+            
+            Spacer()
+            
+            Button(action: {
+                action?(.undo)
+            }, label: {
+                Image(systemName: "arrow.uturn.backward")
+            })
+            
+            Button(action: {
+                action?(.redo)
+            }, label: {
+                Image(systemName: "arrow.uturn.forward")
+            })
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(.white)
+    }
+}
+
 extension QuillEditorWebView {
     func formatText(style: String) {
         let script = """
- var range = quill.getSelection();
-    if (range) {
+    var range = quill.getSelection();
+    if (range && range.length > 0 ) {
         var format = quill.getFormat(range);
         if (format['\(style)'] === true) {
             // If the formatting is already applied, remove it
@@ -191,9 +276,13 @@ extension QuillEditorWebView {
             // If the formatting is not applied, apply it
             quill.formatText(range.index, range.length, '\(style)', true);
         }
+    } else {
+        quill.format('\(style)', !quill.getFormat()['\(style)']);
     }
+    
+    updateCurrentFormat();
 """
-        webView.evaluateJavaScript(script, completionHandler: nil)
+        webView.evaluateJavaScript(script, completionHandler: logHandler)
     }
     
     func insertLink(url: String) {
@@ -202,6 +291,10 @@ extension QuillEditorWebView {
      
         let script = """
                var range = quill.getSelection();
+        
+               if ( range === null ) {
+                  range = savedRange;
+               }
                         
                // Format the text range as a link
                if (range.length > 0) {
@@ -214,7 +307,7 @@ extension QuillEditorWebView {
                window.webkit.messageHandlers.textDidChange.postMessage(quill.root.innerHTML);
         """
         
-        webView.evaluateJavaScript(script, completionHandler: nil)
+        webView.evaluateJavaScript(script, completionHandler: logHandler)
     }
     
     private func replaceLink(url: String) {
@@ -250,20 +343,17 @@ extension QuillEditorWebView {
     }
     
     
-    func toggleList() {
+    func toggleListFormat(style: String) {
         let jsCode = """
- var index = quill.getSelection().index || 0;
-            quill.insertText(index, '\\n'); // Insert a newline before creating the list
-            quill.formatLine(index + 1, 1, 'list', 'bullet'); // Format the line as a bullet list item
-"""
-        webView.evaluateJavaScript(jsCode, completionHandler: nil)
-    }
-    
-    func toggleListOrder() {
-        let jsCode = """
- var index = quill.getSelection().index || 0;
-            quill.insertText(index, '\\n'); // Insert a newline before creating the list
-            quill.formatLine(index + 1, 1, 'list', 'ordered'); // Format the line as a bullet list item
+            var selection = quill.getSelection();
+            var format = quill.getFormat(selection.index, selection.length);
+            if ( format['list'] === '\(style)' ) {
+                quill.removeFormat(selection.index, selection.length);
+            } else {
+                quill.formatLine(selection.index, selection.length, 'list', '\(style)'); // Format the line as a bullet list item
+            }
+
+            updateCurrentFormat();
 """
         webView.evaluateJavaScript(jsCode, completionHandler: nil)
     }
@@ -278,11 +368,9 @@ extension QuillEditorWebView {
         webView.evaluateJavaScript(jsCode, completionHandler: nil)
     }
     
-    func setHTML() {
-        let js = "quill.clipboard.dangerouslyPasteHTML('\(text)');"
-        webView.evaluateJavaScript(js, completionHandler: { _,_ in
-            UIApplication.shared.endEdit()
-        })
+    func updateHeight() {
+        let js = "updateHeight();";
+        webView.evaluateJavaScript(js, completionHandler: logHandler)
     }
     
     func generateHTML() -> String {
@@ -298,127 +386,147 @@ extension QuillEditorWebView {
                   
                   <!-- Create the editor container -->
                   <BODY>
-                      <div id="editor"></div>
+                      <div id="editor">\(html)</div>
                   </BODY>
                   <!-- Include the Quill library -->
                   <script src="https://cdn.jsdelivr.net/npm/quill@2.0.0-rc.2/dist/quill.js"></script>
                   
                   <!-- Initialize Quill editor -->
-                  <script>
-                      const toolbarOptions = [];
-                      var savedRange = null;
-                    
-                        
-                      const quill = new Quill('#editor', {
-                          theme: 'snow',
-                          modules: {
-                              toolbar: false
-                          },
-                          placeholder: '\(placeholder)'
-                      });
-              
-                      var Link = Quill.import('formats/link');
-                      Link.sanitize = function(url) {
-                        // prefix default protocol.
-                        let protocol = url.slice(0, url.indexOf(':'));
-                        if (this.PROTOCOL_WHITELIST.indexOf(protocol) === -1) {
-                          url = 'http://' + url;
-                        }
-                        // Link._sanitize function
-                        let anchor = document.createElement('a');
-                        anchor.href = url;
-                        protocol = anchor.href.slice(0, anchor.href.indexOf(':'));
-                        return (this.PROTOCOL_WHITELIST.indexOf(protocol) > -1) ? url : this.SANITIZED_URL;
-                      }
-                      Quill.register(Link, true);
-              
-              
-                      function updateHeight() {
-                        var element = document.querySelector('div.ql-editor');
-                        var height = element.scrollHeight;
-                        window.webkit.messageHandlers.heightDidChange.postMessage(height);
-                      }
-              
-                      quill.on('text-change', function(delta, oldDelta, source) {
-                           window.webkit.messageHandlers.textDidChange.postMessage(quill.root.innerHTML);
-                            
-                           var length = quill.getText().trim().length;
-                           if (length === 0) {
-                              window.webkit.messageHandlers.heightDidChange.postMessage(0);
-                           } else {
-                              updateHeight();
-                           }
-                      });
-              
-                      function closeLinkTooltip() {
-                        var tooltip = document.querySelector('.ql-tooltip');
-                        if (tooltip) {
-                          tooltip.style.display = 'none';
-                        }
-                      }
-              
-                      quill.on('selection-change', function(range, oldRange, source) {
-                          if (range) {
-                              var formats = quill.getFormat(range.index, range.length);
-              
-                              if (formats && formats.link) {
-                                  savedRange = range;
-                                  closeLinkTooltip();
-                                                
-                                  // Check if the selection includes a link
-                                  if (!oldRange || !oldRange || !oldRange.length || !oldRange.length && !oldRange.index) {
-                                      window.webkit.messageHandlers.editLink.postMessage(formats.link);
-                                  }
-                              }
-                          }
-                      });
-                
-                      function expandSelectionToWord(selection) {
-                          var index = selection.index;
-                          var length = selection.length;
-
-                          // Expand selection to the beginning of the word
-                          while (index > 0 && !/\\s/.test(quill.getText(index - 1, 1))) {
-                              index--;
-                              length++;
-                          }
-
-                          // Expand selection to the end of the word
-                          while (index + length < quill.getLength() && !/\\s/.test(quill.getText(index + length, 1))) {
-                              length++;
-                          }
-
-                          return {
-                              index: index,
-                              length: length
-                          };
-                      }
-              
-                      function replaceURL(newLink) {
-                          var selection = quill.getSelection();
-                          if (selection) {
-                              if (selection.length === 0) {
-                                  selection = expandSelectionToWord(selection);
-                              }
-
-                              var format = quill.getFormat(selection.index, selection.length); // Get format at selection
-                              if (format && format.link) {
-                                  var link = format.link;
-                                  if (newLink !== null) {
-                                      quill.formatText(selection.index, selection.length, 'link', newLink, Quill.sources.USER);
-                                  }
-                              } else {
-                                 window.webkit.messageHandlers.log.postMessage("No link found at the current selection.");
-                                                                    
-                              }
-                          }
-                      }
-              
-                  </script>
+                  \(generateJS())
               </HTML>
 
               """
       }
+    
+    func generateJS() -> String {
+        return """
+      <script>
+          const toolbarOptions = [];
+          var savedRange = null;
+          var contentHasBeenSet = false;
+            
+          const quill = new Quill('#editor', {
+              theme: 'snow',
+              modules: {
+                  toolbar: false
+              },
+              placeholder: '\(placeholder)'
+          });
+  
+          var Link = Quill.import('formats/link');
+          Link.sanitize = function(url) {
+            // prefix default protocol.
+            let protocol = url.slice(0, url.indexOf(':'));
+            if (this.PROTOCOL_WHITELIST.indexOf(protocol) === -1) {
+              url = 'http://' + url;
+            }
+            // Link._sanitize function
+            let anchor = document.createElement('a');
+            anchor.href = url;
+            protocol = anchor.href.slice(0, anchor.href.indexOf(':'));
+            return (this.PROTOCOL_WHITELIST.indexOf(protocol) > -1) ? url : this.SANITIZED_URL;
+          }
+          Quill.register(Link, true);
+  
+  
+          function updateHeight() {
+            window.webkit.messageHandlers.heightDidChange.postMessage(quill.root.offsetHeight);
+          }
+  
+          quill.on('text-change', function(delta, oldDelta, source) {
+               window.webkit.messageHandlers.textDidChange.postMessage(quill.root.innerHTML);
+                
+               var length = quill.getText().trim().length;
+               if (length === 0) {
+                  window.webkit.messageHandlers.heightDidChange.postMessage(0);
+               } else {
+                  updateHeight();
+               }
+                
+               updateCurrentFormat();
+          });
+ 
+          function updateCurrentFormat() {
+               var selection = quill.getSelection();
+               var formats = quill.getFormat(selection.index, selection.length);
+               window.webkit.messageHandlers.currentFormat.postMessage(formats);
+          }
+  
+          function closeLinkTooltip() {
+            var tooltip = document.querySelector('.ql-tooltip');
+            if (tooltip) {
+              tooltip.style.display = 'none';
+            }
+          }
+  
+          quill.on('selection-change', function(range, oldRange, source) {
+              if (range) {
+                  var formats = quill.getFormat(range.index, range.length);
+                  savedRange = range;
+                  window.webkit.messageHandlers.currentFormat.postMessage(formats);
+ 
+                  if (formats && formats.link) {
+                      closeLinkTooltip();
+                                    
+                      // Check if the selection includes a link
+                      if (!oldRange || !oldRange || !oldRange.length || !oldRange.length && !oldRange.index) {
+                          window.webkit.messageHandlers.editLink.postMessage(formats.link);
+                      }
+                  }
+              }
+          });
+    
+          function expandSelectionToWord(selection) {
+              var index = selection.index;
+              var length = selection.length;
+
+              // Expand selection to the beginning of the word
+              while (index > 0 && !/\\s/.test(quill.getText(index - 1, 1))) {
+                  index--;
+                  length++;
+              }
+
+              // Expand selection to the end of the word
+              while (index + length < quill.getLength() && !/\\s/.test(quill.getText(index + length, 1))) {
+                  length++;
+              }
+
+              return {
+                  index: index,
+                  length: length
+              };
+          }
+  
+          function replaceURL(newLink) {
+              var selection = quill.getSelection();
+  
+              if ( selection === null ) {
+                 selection = savedRange;
+              }
+  
+              if (selection) {
+                  if (selection.length === 0) {
+                      selection = expandSelectionToWord(selection);
+                  }
+
+                  var format = quill.getFormat(selection.index, selection.length); // Get format at selection
+                  if (format && format.link) {
+                      var link = format.link;
+                      if (newLink !== null) {
+                          quill.formatText(selection.index, selection.length, 'link', newLink, Quill.sources.USER);
+                      }
+                  } else {
+                     window.webkit.messageHandlers.log.postMessage("No link found at the current selection.");
+                                                        
+                  }
+              }
+          }
+ 
+  
+      </script>
+   
+ """
+    }
     
     func generateCSS() -> String {
         var fontFaceString = ""
@@ -464,6 +572,10 @@ extension QuillEditorWebView {
                 margin-ritht: 0;
                 padding-left: 0;
                 padding-right: 0;
+            }
+        
+            .ql-container, .ql-editor{
+              height: auto;
             }
               
           </style>
@@ -545,10 +657,14 @@ extension QuillEditorWebView {
 
 extension QuillEditorWebView.Coordinator: WKNavigationDelegate {
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if isFirstUpdate, !parent.text.isEmpty {
-            parent.setHTML()
-            isFirstUpdate = false
+        DispatchQueue.main.async {
+            self.parent.updateHeight()
         }
+        
+//        if isFirstUpdate, !parent.text.isEmpty {
+//            parent.setHTML()
+//            isFirstUpdate = false
+//        }
     }
     
     public func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -601,6 +717,7 @@ class RichEditorWebView: WKWebView {
         contentController.add(self, name: "editLink")
         contentController.add(self, name: "log")
         contentController.add(self, name: "heightDidChange")
+        contentController.add(self, name: "currentFormat")
         
         //https://stackoverflow.com/a/63136483
         NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
