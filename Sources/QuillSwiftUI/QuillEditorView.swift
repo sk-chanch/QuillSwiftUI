@@ -15,6 +15,7 @@ public struct QuillEditorView: QuillEditorBase {
     public var onTextChange: ((String) -> ())?
     
     @State private var dynamicHeight: CGFloat = 0
+    @State private var isShowWebview = false
     
     @Binding var text: String
     
@@ -28,15 +29,26 @@ public struct QuillEditorView: QuillEditorBase {
     
     public var body: some View {
         GeometryReader{ proxy in
-            QuillEditorWebView(placeholder: placeholder,
-                               html: html,
-                               width: proxy.size.width,
-                               dynamicHeight: $dynamicHeight,
-                               text: $text)
-                .customFont(font: customFont)
-                .onTextChange(onTextChange)
-                .padding(.bottom, 10)
+            if isShowWebview {
+                QuillEditorWebView(placeholder: placeholder,
+                                   html: html,
+                                   width: proxy.size.width,
+                                   dynamicHeight: $dynamicHeight,
+                                   text: $text)
+                    .customFont(font: customFont)
+                    .onTextChange(onTextChange)
+                    .frame(width: proxy.size.width)
+                  
+            }
         }
         .frame(minHeight: dynamicHeight)
+        .onAppear{
+            DispatchQueue.main.async {
+                isShowWebview = true
+            }
+        }
+        .onDisappear{
+            isShowWebview = false
+        }
     }
 }

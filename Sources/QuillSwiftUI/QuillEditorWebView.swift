@@ -92,10 +92,12 @@ public struct QuillEditorWebView: UIViewRepresentable {
                     if $0 == 0 {
                         let root = UIApplication.shared.currentWindow?.rootViewController
                         root?.present(SFSafariViewController(url: url), animated: true, completion: nil)
-                    } else {
+                    } else if $0 == 1 {
                         alertInsertLink(setupText: url.absoluteString, completionHandler: {
                             replaceLink(url: $0)
                         })
+                    } else {
+                        deleteTextFromSelection()
                     }
                 })
             } else {
@@ -111,7 +113,9 @@ public struct QuillEditorWebView: UIViewRepresentable {
     }
     
     private func loadEditor() {
-        webView.loadHTMLString(generateHTML(), baseURL: Bundle.main.bundleURL)
+        DispatchQueue.main.async {
+            webView.loadHTMLString(generateHTML(), baseURL: Bundle.main.bundleURL)
+        }
     }
 
     private func settingWebView(context: Context) {
@@ -342,7 +346,6 @@ extension QuillEditorWebView {
         }
     }
     
-    
     func toggleListFormat(style: String) {
         let jsCode = """
             var selection = quill.getSelection();
@@ -370,6 +373,30 @@ extension QuillEditorWebView {
     
     func updateHeight() {
         let js = "updateHeight();";
+        webView.evaluateJavaScript(js, completionHandler: logHandler)
+    }
+    
+    func focus(){
+        let js = "quill.focus();"
+        webView.evaluateJavaScript(js, completionHandler: logHandler)
+    }
+    
+    func deleteTextFromSelection() {
+        let js = """
+            var selection = quill.getSelection();
+
+            if ( selection === null ) {
+               selection = savedRange;
+            }
+
+            if (selection) {
+                if (selection.length === 0) {
+                    selection = expandSelectionToWord(selection);
+                }
+                
+                quill.deleteText(selection.index, selection.length);
+            }
+          """
         webView.evaluateJavaScript(js, completionHandler: logHandler)
     }
     
@@ -411,6 +438,20 @@ extension QuillEditorWebView {
                   toolbar: false
               },
               placeholder: '\(placeholder)'
+          });
+        
+          //remove format text on paste
+          quill.clipboard.addMatcher(Node.ELEMENT_NODE, (node, delta) => {
+            let ops = []
+            delta.ops.forEach(op => {
+              if (op.insert && typeof op.insert === 'string') {
+                ops.push({
+                  insert: op.insert
+                })
+              }
+            })
+            delta.ops = ops
+            return delta
           });
   
           var Link = Quill.import('formats/link');
@@ -517,7 +558,6 @@ extension QuillEditorWebView {
                       }
                   } else {
                      window.webkit.messageHandlers.log.postMessage("No link found at the current selection.");
-                                                        
                   }
               }
           }
@@ -602,6 +642,8 @@ extension QuillEditorWebView {
                 let text = textField.text {
                 completionHandler?(text)
             }
+            
+            focus()
         }
         alertController.addAction(okayAction)
         
@@ -627,6 +669,11 @@ extension QuillEditorWebView {
         }))
         
         // Add an action (button)
+        alertController.addAction(UIAlertAction(title: "ลบ", style: .default, handler: {_ in
+            completionHandler?(2)
+        }))
+        
+        // Add an action (button)
         alertController.addAction(UIAlertAction(title: "ยกเลิก", style: .cancel, handler: nil))
         
         guard let root = UIApplication.shared.currentWindow?.rootViewController
@@ -646,8 +693,6 @@ extension QuillEditorWebView {
        
         let parent: QuillEditorWebView
         
-        var isFirstUpdate = true
-        
         init(parent: QuillEditorWebView) {
             self.parent = parent
         }
@@ -657,14 +702,7 @@ extension QuillEditorWebView {
 
 extension QuillEditorWebView.Coordinator: WKNavigationDelegate {
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        DispatchQueue.main.async {
-            self.parent.updateHeight()
-        }
-        
-//        if isFirstUpdate, !parent.text.isEmpty {
-//            parent.setHTML()
-//            isFirstUpdate = false
-//        }
+        self.parent.updateHeight()
     }
     
     public func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -677,9 +715,7 @@ extension QuillEditorWebView.Coordinator: WKNavigationDelegate {
             decisionHandler(WKNavigationActionPolicy.allow)
             return
         }
-        
-        print("Clicked URL: \(url)")
-        
+    
         if url.scheme == nil {
             guard let httpsURL = URL(string: "https://\(url.absoluteString)") else {
                 decisionHandler(WKNavigationActionPolicy.cancel)

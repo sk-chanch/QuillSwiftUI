@@ -18,13 +18,13 @@ public protocol QuillEditorBase: View {
 }
 
 public extension QuillEditorBase {
-    public func customFont(font: UIFont?) -> Self {
+    func customFont(font: UIFont?) -> Self {
         var copy = self
         copy.customFont = font
         return copy
     }
     
-    public func onTextChange(_ perform: ((String)->())?) -> Self {
+    func onTextChange(_ perform: ((String)->())?) -> Self {
         var copy = self
         copy.onTextChange = perform
         return copy
