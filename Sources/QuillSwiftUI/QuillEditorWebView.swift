@@ -38,78 +38,85 @@ public struct QuillEditorWebView: UIViewRepresentable {
     
     public var customFont: UIFont?
     public var onTextChange: ((String)->())?
+    public var onTerminate: (()->())?
     
     public init(placeholder: String,
                 html: String = "",
                 width: CGFloat,
                 dynamicHeight: Binding<CGFloat>,
-                text: Binding<String>) {
+                text: Binding<String>,
+                onTerminate: (()->())? = nil) {
         self.placeholder = placeholder
         self._dynamicHeight = dynamicHeight
         self._text = text
         self.html = html
         self.width = width
+        self.onTerminate = onTerminate
     }
     
     public func makeUIView(context: Context) -> some WKWebView {
         settingWebView(context: context)
      
         webView.didReceive = { message in
-            
-            guard message.name != "log"
-            else {
-                print(message.body)
-                return
-            }
-            
-            guard message.name != "heightDidChange"
-            else {
-                DispatchQueue.main.async {
-                    dynamicHeight = (message.body as? CGFloat) ?? 0
-                }
-                return
-            }
-            
-            guard message.name != "currentFormat"
-            else {
-                configuration.currentFormat = (message.body as? [String: Any]) ?? [:]
-                print(configuration.currentFormat)
-                return
-            }
-            
-            print(message.body)
-            
-            if message.name == "editLink",
-                var url = (message.body as? String)?.url {
-                if url.scheme == nil {
-                    guard let httpsURL = URL(string: "https://\(url.absoluteString)") else {
-                        return
-                    }
-                    url = httpsURL
-                }
-                
-                alertEditLink(completionHandler: {
-                    if $0 == 0 {
-                        let root = UIApplication.shared.currentWindow?.rootViewController
-                        root?.present(SFSafariViewController(url: url), animated: true, completion: nil)
-                    } else if $0 == 1 {
-                        alertInsertLink(setupText: url.absoluteString, completionHandler: {
-                            replaceLink(url: $0)
-                        })
-                    } else {
-                        deleteTextFromSelection()
-                    }
-                })
-            } else {
-                let changeText = (message.body as? String) ?? ""
-                text = changeText
-                onTextChange?(changeText)
-            }
+            processMessage(message: message)
         }
         
         loadEditor()
         
         return webView
+    }
+    
+    private func processMessage(message: WKScriptMessage) {
+        guard message.name != "log"
+        else {
+            print(message.body)
+            return
+        }
+        
+        guard message.name != "heightDidChange"
+        else {
+            DispatchQueue.main.async {
+                dynamicHeight = (message.body as? CGFloat) ?? 0
+            }
+            return
+        }
+        
+        guard message.name != "currentFormat"
+        else {
+            configuration.currentFormat = (message.body as? [String: Any]) ?? [:]
+            print(configuration.currentFormat)
+            return
+        }
+        
+        print(message.body)
+        
+        if message.name == "editLink",
+            var url = (message.body as? String)?.url {
+            if url.scheme == nil {
+                guard let httpsURL = URL(string: "https://\(url.absoluteString)") else {
+                    return
+                }
+                url = httpsURL
+            }
+            
+            alertEditLink(completionHandler: {
+                if $0 == 0 {
+                    let root = UIApplication.shared.currentWindow?.rootViewController
+                    root?.present(SFSafariViewController(url: url), animated: true, completion: nil)
+                } else if $0 == 1 {
+                    alertInsertLink(setupText: url.absoluteString, completionHandler: {
+                        replaceLink(url: $0)
+                    })
+                } else {
+                    deleteTextFromSelection()
+                }
+            })
+        } else {
+            let changeText = (message.body as? String) ?? ""
+            text = changeText
+            onTextChange?(changeText)
+        }
+
     }
     
     private func loadEditor() {
@@ -407,7 +414,7 @@ extension QuillEditorWebView {
                       <meta name='viewport' content='width=device-width, shrink-to-fit=YES, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no'>
                   </head>
                   <!-- Include stylesheet -->
-                  <link href="https://cdn.jsdelivr.net/npm/quill@2.0.0-rc.2/dist/quill.snow.css" rel="stylesheet" />
+                  <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet" />
                   
                 \(generateCSS())
                   
@@ -416,7 +423,7 @@ extension QuillEditorWebView {
                       <div id="editor">\(html)</div>
                   </BODY>
                   <!-- Include the Quill library -->
-                  <script src="https://cdn.jsdelivr.net/npm/quill@2.0.0-rc.2/dist/quill.js"></script>
+                  <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
                   
                   <!-- Initialize Quill editor -->
                   \(generateJS())
@@ -468,18 +475,64 @@ extension QuillEditorWebView {
             return (this.PROTOCOL_WHITELIST.indexOf(protocol) > -1) ? url : this.SANITIZED_URL;
           }
           Quill.register(Link, true);
+ 
+        function debounce(func, delay) {
+             let timeoutId;
+             return function() {
+                 const context = this;
+                 const args = arguments;
+                 clearTimeout(timeoutId);
+                 timeoutId = setTimeout(function() {
+                     func.apply(context, args);
+                 }, delay);
+             };
+         }
+
+         function throttle(func, limit) {
+             let lastFunc;
+             let lastRan;
+             return function() {
+                 const context = this;
+                 const args = arguments;
+                 if (!lastRan) {
+                     func.apply(context, args);
+                     lastRan = Date.now();
+                 } else {
+                     clearTimeout(lastFunc);
+                     lastFunc = setTimeout(function() {
+                         if ((Date.now() - lastRan) >= limit) {
+                             func.apply(context, args);
+                             lastRan = Date.now();
+                         }
+                     }, limit - (Date.now() - lastRan));
+                 }
+             };
+         }
+
+         const debouncedTextDidChange = debounce(function(content) {
+             window.webkit.messageHandlers.textDidChange.postMessage(content);
+         }, 1000);
+
+        const throttledHeightDidChange = throttle(function(height) {
+            window.webkit.messageHandlers.heightDidChange.postMessage(height);
+        }, 1000);
+
+         const debouncedUpdateCurrentFormat = debounce(function(content) {
+            window.webkit.messageHandlers.currentFormat.postMessage(content);
+         }, 1000);
   
   
           function updateHeight() {
-            window.webkit.messageHandlers.heightDidChange.postMessage(quill.root.offsetHeight);
+            throttledHeightDidChange(quill.root.offsetHeight);
           }
   
           quill.on('text-change', function(delta, oldDelta, source) {
-               window.webkit.messageHandlers.textDidChange.postMessage(quill.root.innerHTML);
+               const content = quill.root.innerHTML;
+               debouncedTextDidChange(content);
                 
-               var length = quill.getText().trim().length;
+               const length = quill.getText().trim().length;
                if (length === 0) {
-                  window.webkit.messageHandlers.heightDidChange.postMessage(0);
+                  throttledHeightDidChange(0);
                } else {
                   updateHeight();
                }
@@ -488,9 +541,9 @@ extension QuillEditorWebView {
           });
  
           function updateCurrentFormat() {
-               var selection = quill.getSelection();
-               var formats = quill.getFormat(selection.index, selection.length);
-               window.webkit.messageHandlers.currentFormat.postMessage(formats);
+              const selection = quill.getSelection();
+              const formats = quill.getFormat(selection.index, selection.length);
+              debouncedUpdateCurrentFormat(formats);
           }
   
           function closeLinkTooltip() {
@@ -728,6 +781,10 @@ extension QuillEditorWebView.Coordinator: WKNavigationDelegate {
         root?.present(SFSafariViewController(url: url), animated: true, completion: nil)
         
         decisionHandler(WKNavigationActionPolicy.cancel)
+    }
+    
+    public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        self.parent.onTerminate?()
     }
 }
 

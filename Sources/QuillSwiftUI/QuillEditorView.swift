@@ -34,11 +34,19 @@ public struct QuillEditorView: QuillEditorBase {
                                    html: html,
                                    width: proxy.size.width,
                                    dynamicHeight: $dynamicHeight,
-                                   text: $text)
+                                   text: $text,
+                                   onTerminate: {
+                    DispatchQueue.main.async {
+                        isShowWebview = false
+                    }
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        isShowWebview = true
+                    }
+                })
                     .customFont(font: customFont)
                     .onTextChange(onTextChange)
                     .frame(width: proxy.size.width)
-                  
             }
         }
         .frame(minHeight: dynamicHeight)
