@@ -16,7 +16,7 @@ let package = Package(
     ],
     
     dependencies: [
-        .package(url: "https://github.com/SwifterSwift/SwifterSwift.git", from: "6.0.0")
+        .package(url: "https://github.com/SwifterSwift/SwifterSwift.git", .upToNextMinor(from: "7.0.0"))
     ],
     
     targets: [
